@@ -397,7 +397,7 @@ class Train:
                 output = netG(input)
 
                 loss_G = fn_REG(output * (1 - mask), label * (1 - mask))
-
+                print(PSNR(output * (1 - mask), label * (1 - mask)))
                 loss_G_test += [loss_G.item()]
 
                 input = transform_inv(input)
