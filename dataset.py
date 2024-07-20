@@ -14,7 +14,8 @@ class Dataset(torch.utils.data.Dataset):
        stuff<number>_density.pt
     """
 
-    def __init__(self, data_dir, data_type='float32', transform=None, sgm=25, ratio=0.9, size_data=(256, 256, 3), size_window=(5, 5)):
+    def __init__(self, data_dir, data_type='float32', transform=None, sgm=25, ratio=0.9, size_data=(256, 256, 3),
+                 size_window=(5, 5), is_train=True):
         self.data_dir = data_dir
         self.transform = transform
         self.data_type = data_type
@@ -24,7 +25,7 @@ class Dataset(torch.utils.data.Dataset):
         self.size_data = size_data
         self.size_window = size_window
 
-        lst_data = os.listdir(data_dir)
+        # lst_data = os.listdir(data_dir)
 
         # lst_input = [f for f in lst_data if f.startswith('input')]
         # lst_label = [f for f in lst_data if f.startswith('label')]
@@ -35,12 +36,15 @@ class Dataset(torch.utils.data.Dataset):
         # self.lst_input = lst_input
         # self.lst_label = lst_label
 
-        lst_data.sort(key=lambda f: (''.join(filter(str.isdigit, f))))
+        # lst_data.sort(key=lambda f: (''.join(filter(str.isdigit, f))))
         # lst_data.sort(key=lambda f: int(''.join(filter(str.isdigit, f))))
 
-        self.lst_data = lst_data
-        self.noise = self.sgm / 255.0 * np.random.randn(len(self.lst_data), self.size_data[0], self.size_data[1], self.size_data[2])
-
+        # self.lst_data = lst_data
+        # self.noise = self.sgm / 255.0 * np.random.randn(len(self.lst_data), self.size_data[0], self.size_data[1], self.size_data[2])
+        if is_train:
+            self.data = np.load("/opt/n2v/data/train/DCNN400_train_gaussian25_pairs.npy")
+        else:
+            self.data = np.load("/opt/n2v/data/test/DCNN400_test_gaussian25_pairs.npy")
     def __getitem__(self, index):
         # label = np.load(os.path.join(self.data_dir, self.lst_label[index]))
         # input = np.load(os.path.join(self.data_dir, self.lst_input[index]))
@@ -62,8 +66,8 @@ class Dataset(torch.utils.data.Dataset):
         #
         # data = {'input': input, 'label': label}
 
-        data = plt.imread(os.path.join(self.data_dir, self.lst_data[index]))
-
+        # data = plt.imread(os.path.join(self.data_dir, self.lst_data[index]))
+        data = self.data[index][1]
         if data.dtype == np.uint8:
             data = data / 255.0
 
@@ -73,7 +77,7 @@ class Dataset(torch.utils.data.Dataset):
         if data.shape[0] > data.shape[1]:
             data = data.transpose((1, 0, 2))
 
-        label = data + self.noise[index]
+        label = data# + self.noise[index]
         input, mask = self.generate_mask(copy.deepcopy(label))
 
         data = {'label': label, 'input': input, 'mask': mask}
@@ -84,7 +88,8 @@ class Dataset(torch.utils.data.Dataset):
         return data
 
     def __len__(self):
-        return len(self.lst_data)
+        # return len(self.lst_data)
+        return self.data.shape[0]
 
     def generate_mask(self, input):
 
