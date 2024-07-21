@@ -7,8 +7,9 @@ import torch.nn as nn
 from torchvision import transforms
 from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
+import math
 
-##
+
 class Train:
     def __init__(self, args):
         self.mode = args.mode
@@ -138,22 +139,30 @@ class Train:
         if not os.path.exists(os.path.join(dir_result_val, 'images')):
             os.makedirs(os.path.join(dir_result_val, 'images'))
 
-        transform_train = transforms.Compose([Normalize(mean=0.5, std=0.5), RandomFlip(), RandomCrop((self.ny_load, self.nx_load)), ToTensor()])
-        transform_val = transforms.Compose([Normalize(mean=0.5, std=0.5), RandomFlip(), RandomCrop((self.ny_load, self.nx_load)), ToTensor()])
+        transform_train = transforms.Compose(
+            [Normalize(mean=0.5, std=0.5), RandomFlip(), RandomCrop((self.ny_load, self.nx_load)), ToTensor()])
+        # transform_val = transforms.Compose(
+        #     [Normalize(mean=0.5, std=0.5), RandomFlip(), RandomCrop((self.ny_load, self.nx_load)), ToTensor()])
+
+        transform_val = transforms.Compose([TestNormalize(mean=0.5, std=0.5), TestToTensor()])
 
         transform_inv = transforms.Compose([ToNumpy(), Denormalize(mean=0.5, std=0.5)])
 
-        dataset_train = Dataset(dir_data_train, data_type=self.data_type, transform=transform_train, sgm=25, ratio=0.9, size_data=size_data, size_window=size_window)
+        dataset_train = Dataset(dir_data_train, data_type=self.data_type, transform=transform_train, sgm=25, ratio=0.9,
+                                size_data=size_data, size_window=size_window)
         # dataset_val = Dataset(dir_data_val, data_type=self.data_type, transform=transform_val, sgm=25, ratio=0.9, size_data=size_data, size_window=size_window)
+        dataset_val = Dataset(dir_data_val, data_type=self.data_type, transform=transform_val, sgm=25, ratio=1,
+                              size_data=size_data, size_window=size_window, is_train=False)
 
         loader_train = torch.utils.data.DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8)
         # loader_val = torch.utils.data.DataLoader(dataset_val, batch_size=batch_size, shuffle=True, num_workers=8)
+        loader_val = torch.utils.data.DataLoader(dataset_val, batch_size=1, shuffle=False, num_workers=8)
 
         num_train = len(dataset_train)
-        # num_val = len(dataset_val)
+        num_val = len(dataset_val)
 
         num_batch_train = int((num_train / batch_size) + ((num_train % batch_size) != 0))
-        # num_batch_val = int((num_val / batch_size) + ((num_val % batch_size) != 0))
+        num_batch_val = int((num_val / batch_size) + ((num_val % batch_size) != 0))
 
         if nch_out == 1:
             cmap = 'gray'
@@ -167,8 +176,8 @@ class Train:
         init_net(netG, init_type='normal', init_gain=0.02, gpu_ids=gpu_ids)
 
         ## setup loss & optimization
-        fn_REG = nn.L1Loss().to(device)  # Regression loss: L1
-        # fn_REG = nn.MSELoss().to(device)     # Regression loss: L2
+        # fn_REG = nn.L1Loss().to(device)  # Regression loss: L1
+        fn_REG = nn.MSELoss().to(device)  # Regression loss: L2
 
         paramsG = netG.parameters()
 
@@ -239,72 +248,133 @@ class Train:
                                    'label': "%04d-label.png" % name,
                                    'dif': "%04d-dif.png" % name}
 
-                        plt.imsave(os.path.join(dir_result_train, 'images', fileset['input']), input[j, :, :, :].squeeze(), cmap=cmap)
-                        plt.imsave(os.path.join(dir_result_train, 'images', fileset['output']), output[j, :, :, :].squeeze(), cmap=cmap)
-                        plt.imsave(os.path.join(dir_result_train, 'images', fileset['label']), label[j, :, :, :].squeeze(), cmap=cmap)
-                        plt.imsave(os.path.join(dir_result_train, 'images', fileset['dif']), dif[j, :, :, :].squeeze(), cmap=cmap)
+                        plt.imsave(os.path.join(dir_result_train, 'images', fileset['input']),
+                                   input[j, :, :, :].squeeze(), cmap=cmap)
+                        plt.imsave(os.path.join(dir_result_train, 'images', fileset['output']),
+                                   output[j, :, :, :].squeeze(), cmap=cmap)
+                        plt.imsave(os.path.join(dir_result_train, 'images', fileset['label']),
+                                   label[j, :, :, :].squeeze(), cmap=cmap)
+                        plt.imsave(os.path.join(dir_result_train, 'images', fileset['dif']), dif[j, :, :, :].squeeze(),
+                                   cmap=cmap)
 
                         append_index(dir_result_train, fileset)
 
             writer_train.add_scalar('loss_G', np.mean(loss_G_train), epoch)
 
             ## validation phase
-            # with torch.no_grad():
-            #     netG.eval()
-            #
-            #     loss_G_val = []
-            #
-            #     for batch, data in enumerate(loader_val, 1):
-            #         def should(freq):
-            #             return freq > 0 and (batch % freq == 0 or batch == num_batch_val)
-            #
-            #         # input = data['input'].to(device)
-            #         input = data['label'].to(device)
-            #         label = data['label'].to(device)
-            #         mask = data['mask'].to(device)
-            #
-            #         # forward netG
-            #         output = netG(input)
-            #
-            #         loss_G = fn_REG(output * (1 - mask), label * (1 - mask))
-            #
-            #         loss_G_val += [loss_G.item()]
-            #
-            #         print('VALID: EPOCH %d: BATCH %04d/%04d: LOSS: %.4f'
-            #               % (epoch, batch, num_batch_val, np.mean(loss_G_val)))
-            #
-            #         if should(num_freq_disp):
-            #             ## show output
-            #             input = transform_inv(input)
-            #             label = transform_inv(label)
-            #             output = transform_inv(output)
-            #
-            #             input = np.clip(input, 0, 1)
-            #             label = np.clip(label, 0, 1)
-            #             output = np.clip(output, 0, 1)
-            #             dif = np.clip(abs(label - input), 0, 1)
-            #
-            #             writer_val.add_images('input', input, num_batch_val * (epoch - 1) + batch, dataformats='NHWC')
-            #             writer_val.add_images('output', output, num_batch_val * (epoch - 1) + batch, dataformats='NHWC')
-            #             writer_val.add_images('label', label, num_batch_val * (epoch - 1) + batch, dataformats='NHWC')
-            #
-            #             for j in range(label.shape[0]):
-            #                 # name = num_train * (epoch - 1) + num_batch_train * (batch - 1) + j
-            #                 name = num_batch_train * (batch - 1) + j
-            #                 fileset = {'name': name,
-            #                            'input': "%04d-input.png" % name,
-            #                            'output': "%04d-output.png" % name,
-            #                            'label': "%04d-label.png" % name,
-            #                            'dif': "%04d-dif.png" % name, }
-            #
-            #                 plt.imsave(os.path.join(dir_result_val, 'images', fileset['input']), input[j, :, :, :].squeeze(), cmap=cmap)
-            #                 plt.imsave(os.path.join(dir_result_val, 'images', fileset['output']), output[j, :, :, :].squeeze(), cmap=cmap)
-            #                 plt.imsave(os.path.join(dir_result_val, 'images', fileset['label']), label[j, :, :, :].squeeze(), cmap=cmap)
-            #                 plt.imsave(os.path.join(dir_result_val, 'images', fileset['dif']), dif[j, :, :, :].squeeze(), cmap=cmap)
-            #
-            #                 append_index(dir_result_val, fileset)
-            #
-            #     writer_val.add_scalar('loss_G', np.mean(loss_G_val), epoch)
+            with torch.no_grad():
+                netG.eval()
+
+                # loss_G_val = []
+                psnrs = []
+                for i, data in enumerate(loader_val, 1):
+                # for i, data in enumerate(loader_test, 1):
+
+                    # def should(freq):
+                    #     return freq > 0 and (batch % freq == 0 or batch == num_batch_val)
+
+                    clean = data['clean'].to(device)
+                    noisy = data['noisy'].to(device)
+                    # print(clean.shape)
+                    # print(noisy.shape)
+                    output = netG(noisy)
+
+                    # loss_G = fn_REG(output * (1 - mask), label * (1 - mask))
+                    # print(PSNR(output * (1 - mask), label * (1 - mask)))
+                    # print(clean.shape, noisy.shape, output.shape)
+                    # loss_G = fn_REG(output, clean)
+                    psnr = PSNR(
+                        clean.squeeze().float().clamp_(0, 1).cpu().numpy(),
+                        output.squeeze().float().clamp_(0, 1).cpu().numpy(),
+                    )
+                    print(f"PSNR for image {i}: {psnr}")
+                    psnrs.append(psnr)
+                    # loss_G_val += [loss_G.item()]
+
+                    clean = transform_inv(clean)
+                    noisy = transform_inv(noisy)
+                    output = transform_inv(output)
+
+                    clean = np.clip(clean, 0, 1)
+                    noisy = np.clip(noisy, 0, 1)
+                    output = np.clip(output, 0, 1)
+                    dif = np.clip(abs(output - clean), 0, 1)
+
+                    # for j in range(noisy.shape[0]):
+                    #     name = batch_size * (i - 1) + j
+                    #     fileset = {'name': name,
+                    #                'clean': "%04d-clean.png" % name,
+                    #                'output': "%04d-output.png" % name,
+                    #                # 'label': "%04d-label.png" % name,
+                    #                'noisy': "%04d-noisy.png" % name,
+                    #                'dif': "%04d-dif.png" % name, }
+
+                        # plt.imsave(os.path.join(dir_result_test, 'images', fileset['clean']),
+                        #            clean[j, :, :, :].squeeze(),
+                        #            cmap=cmap)
+                        # plt.imsave(os.path.join(dir_result_test, 'images', fileset['output']),
+                        #            output[j, :, :, :].squeeze(),
+                        #            cmap=cmap)
+                        # plt.imsave(os.path.join(dir_result_test, 'images', fileset['noisy']),
+                        #            noisy[j, :, :, :].squeeze(),
+                        #            cmap=cmap)
+                        # plt.imsave(os.path.join(dir_result_test, 'images', fileset['dif']), dif[j, :, :, :].squeeze(),
+                        #            cmap=cmap)
+                        #
+                        # append_index(dir_result_test, fileset)
+
+                    # print('TEST: %d/%d: LOSS: %.6f' % (i, num_batch_test, loss_G.item()))
+                # print('TEST: AVERAGE LOSS: %.6f' % (np.mean(loss_G_test)))
+                print(f"AVG PSNR: {np.mean(psnrs)}")
+
+
+                #     # input = data['input'].to(device)
+                #     input = data['label'].to(device)
+                #     label = data['label'].to(device)
+                #     mask = data['mask'].to(device)
+                #
+                #     # forward netG
+                #     output = netG(input)
+                #
+                #     loss_G = fn_REG(output * (1 - mask), label * (1 - mask))
+                #
+                #     loss_G_val += [loss_G.item()]
+                #
+                #     print('VALID: EPOCH %d: BATCH %04d/%04d: LOSS: %.4f'
+                #           % (epoch, batch, num_batch_val, np.mean(loss_G_val)))
+                #
+                #     if should(num_freq_disp):
+                #         ## show output
+                #         input = transform_inv(input)
+                #         label = transform_inv(label)
+                #         output = transform_inv(output)
+                #
+                #         input = np.clip(input, 0, 1)
+                #         label = np.clip(label, 0, 1)
+                #         output = np.clip(output, 0, 1)
+                #         dif = np.clip(abs(label - input), 0, 1)
+                #
+                #         writer_val.add_images('input', input, num_batch_val * (epoch - 1) + batch, dataformats='NHWC')
+                #         writer_val.add_images('output', output, num_batch_val * (epoch - 1) + batch, dataformats='NHWC')
+                #         writer_val.add_images('label', label, num_batch_val * (epoch - 1) + batch, dataformats='NHWC')
+                #
+                #         for j in range(label.shape[0]):
+                #             # name = num_train * (epoch - 1) + num_batch_train * (batch - 1) + j
+                #             name = num_batch_train * (batch - 1) + j
+                #             fileset = {'name': name,
+                #                        'input': "%04d-input.png" % name,
+                #                        'output': "%04d-output.png" % name,
+                #                        'label': "%04d-label.png" % name,
+                #                        'dif': "%04d-dif.png" % name, }
+                #
+                #             plt.imsave(os.path.join(dir_result_val, 'images', fileset['input']), input[j, :, :, :].squeeze(), cmap=cmap)
+                #             plt.imsave(os.path.join(dir_result_val, 'images', fileset['output']), output[j, :, :, :].squeeze(), cmap=cmap)
+                #             plt.imsave(os.path.join(dir_result_val, 'images', fileset['label']), label[j, :, :, :].squeeze(), cmap=cmap)
+                #             plt.imsave(os.path.join(dir_result_val, 'images', fileset['dif']), dif[j, :, :, :].squeeze(), cmap=cmap)
+                #
+                #             append_index(dir_result_val, fileset)
+                #
+                # writer_val.add_scalar('loss_G', np.mean(loss_G_val), epoch)
 
             # update schduler
             # schedG.step()
@@ -312,6 +382,7 @@ class Train:
 
             ## save
             if (epoch % num_freq_save) == 0:
+                print(f"Saving model for epoch: {epoch}...")
                 self.save(dir_chck, netG, optimG, epoch)
 
         writer_train.close()
@@ -331,7 +402,6 @@ class Train:
         size_data = (self.ny_in, self.nx_in, self.nch_in)
         size_window = (5, 5)
 
-
         norm = self.norm
 
         name_data = self.name_data
@@ -350,12 +420,13 @@ class Train:
 
         dir_data_test = os.path.join(self.dir_data, name_data, 'test')
 
-        transform_test = transforms.Compose([Normalize(mean=0.5, std=0.5), ToTensor()])
+        transform_test = transforms.Compose([TestNormalize(mean=0.5, std=0.5), TestToTensor()])
         transform_inv = transforms.Compose([ToNumpy(), Denormalize(mean=0.5, std=0.5)])
         # transform_ts2np = ToNumpy()
 
         # dataset_test = Dataset(dir_data_test, data_type=self.data_type, transform=transform_test, sgm=(0, 25))
-        dataset_test = Dataset(dir_data_test, data_type=self.data_type, transform=transform_test, sgm=25, ratio=1, size_data=size_data, size_window=size_window)
+        dataset_test = Dataset(dir_data_test, data_type=self.data_type, transform=transform_test, sgm=25, ratio=1,
+                               size_data=size_data, size_window=size_window, is_train=False)
         loader_test = torch.utils.data.DataLoader(dataset_test, batch_size=batch_size, shuffle=False, num_workers=8)
 
         num_test = len(dataset_test)
@@ -363,8 +434,8 @@ class Train:
         num_batch_test = int((num_test / batch_size) + ((num_test % batch_size) != 0))
 
         ## setup network
-        # netG = UNet(nch_in, nch_out, nch_ker, norm)
-        netG = ResNet(nch_in, nch_out, nch_ker, norm)
+        netG = UNet(nch_in, nch_out, nch_ker, norm)
+        # netG = ResNet(nch_in, nch_out, nch_ker, norm)
         init_net(netG, init_type='normal', init_gain=0.02, gpu_ids=gpu_ids)
 
         ## setup loss & optimization
@@ -382,7 +453,7 @@ class Train:
             # netG.train()
 
             loss_G_test = []
-
+            psnrs = []
             # for gt, img in zip(groundtruth_data, test_data):
             #     p_ = model.predict(img.astype(np.float32), 'YX', tta=False);
             #     pred.append(p_)
@@ -390,42 +461,59 @@ class Train:
             for i, data in enumerate(loader_test, 1):
 
                 # input = data['input'].to(device)
-                input = data['label'].to(device)
-                label = data['label'].to(device)
-                mask = data['mask'].to(device)
+                # input = data['label'].to(device)
+                # label = data['label'].to(device)
+                # mask = data['mask'].to(device)
 
-                output = netG(input)
+                clean = data['clean'].to(device)
+                noisy = data['noisy'].to(device)
 
-                loss_G = fn_REG(output * (1 - mask), label * (1 - mask))
-                print(PSNR(output * (1 - mask), label * (1 - mask)))
+                output = netG(noisy)
+
+                # loss_G = fn_REG(output * (1 - mask), label * (1 - mask))
+                # print(PSNR(output * (1 - mask), label * (1 - mask)))
+                # print(clean.shape, noisy.shape, output.shape)
+                loss_G = fn_REG(output, clean)
+                psnr = PSNR(
+                    clean.squeeze().float().clamp_(0, 1).cpu().numpy(),
+                    output.squeeze().float().clamp_(0, 1).cpu().numpy(),
+                )
+                print(psnr)
+                psnrs.append(psnr)
                 loss_G_test += [loss_G.item()]
 
-                input = transform_inv(input)
-                label = transform_inv(label)
+                clean = transform_inv(clean)
+                noisy = transform_inv(noisy)
                 output = transform_inv(output)
 
-                input = np.clip(input, 0, 1)
-                label = np.clip(label, 0, 1)
+                clean = np.clip(clean, 0, 1)
+                noisy = np.clip(noisy, 0, 1)
                 output = np.clip(output, 0, 1)
-                dif = np.clip(abs(label - input), 0, 1)
+                dif = np.clip(abs(output - clean), 0, 1)
 
-                for j in range(label.shape[0]):
+                for j in range(noisy.shape[0]):
                     name = batch_size * (i - 1) + j
                     fileset = {'name': name,
-                               'input': "%04d-input.png" % name,
+                               'clean': "%04d-clean.png" % name,
                                'output': "%04d-output.png" % name,
-                               'label': "%04d-label.png" % name,
-                               'dif': "%04d-dif.png" % name,}
+                               # 'label': "%04d-label.png" % name,
+                               'noisy': "%04d-noisy.png" % name,
+                               'dif': "%04d-dif.png" % name, }
 
-                    plt.imsave(os.path.join(dir_result_test, 'images', fileset['input']), input[j, :, :, :].squeeze(), cmap=cmap)
-                    plt.imsave(os.path.join(dir_result_test, 'images', fileset['output']), output[j, :, :, :].squeeze(), cmap=cmap)
-                    plt.imsave(os.path.join(dir_result_test, 'images', fileset['label']), label[j, :, :, :].squeeze(), cmap=cmap)
-                    plt.imsave(os.path.join(dir_result_test, 'images', fileset['dif']), dif[j, :, :, :].squeeze(), cmap=cmap)
+                    plt.imsave(os.path.join(dir_result_test, 'images', fileset['clean']), clean[j, :, :, :].squeeze(),
+                               cmap=cmap)
+                    plt.imsave(os.path.join(dir_result_test, 'images', fileset['output']), output[j, :, :, :].squeeze(),
+                               cmap=cmap)
+                    plt.imsave(os.path.join(dir_result_test, 'images', fileset['noisy']), noisy[j, :, :, :].squeeze(),
+                               cmap=cmap)
+                    plt.imsave(os.path.join(dir_result_test, 'images', fileset['dif']), dif[j, :, :, :].squeeze(),
+                               cmap=cmap)
 
                     append_index(dir_result_test, fileset)
 
                 print('TEST: %d/%d: LOSS: %.6f' % (i, num_batch_test, loss_G.item()))
             print('TEST: AVERAGE LOSS: %.6f' % (np.mean(loss_G_test)))
+            print(f"AVG PSNR: {np.mean(psnrs)}")
 
 
 def set_requires_grad(nets, requires_grad=False):
@@ -459,6 +547,7 @@ def get_scheduler(optimizer, opt):
         def lambda_rule(epoch):
             lr_l = 1.0 - max(0, epoch + opt.epoch_count - opt.n_epochs) / float(opt.n_epochs_decay + 1)
             return lr_l
+
         scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda_rule)
     elif opt.lr_policy == 'step':
         scheduler = lr_scheduler.StepLR(optimizer, step_size=opt.lr_decay_iters, gamma=0.1)
@@ -516,5 +605,9 @@ def add_plot(output, label, writer, epoch=[], ylabel='Density', xlabel='Radius',
 
 
 def PSNR(gt, img):
-    mse = np.mean(np.square(gt - img))
-    return 20 * np.log10(255) - 10 * np.log10(mse)
+    rounded_gt = np.uint8((gt * 255.0).round())
+    rounded_img = np.uint8((img * 255.0).round())
+    rounded_gt = rounded_gt.astype(np.float64)
+    rounded_img = rounded_img.astype(np.float64)
+    mse = np.mean((rounded_gt - rounded_img) ** 2)
+    return 20 * math.log10(255.0 / math.sqrt(mse))
